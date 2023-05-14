@@ -1,0 +1,46 @@
+version: 0.2
+environment_variables:
+  plaintext:
+     S3_BUCKET: ""
+     CONFIG_BUCKET_NAME: ""
+     DISTRIBUTION_ID: ""
+     projectKey: ""
+     projectVersion: ""
+     projectName: ""
+env:
+  parameter-store:
+    SONAR_TOKEN: 'SONAR_TOKEN'
+    SONAR_HOST: 'SONAR_HOST'
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18.x
+  pre_build:
+    commands:
+      - echo Installing source NPM dependencies...
+      - aws s3 cp s3://$CONFIG_BUCKET_NAME//config-ui/.env .
+      - npm install --legacy-peer-deps
+  build:
+    commands:
+      - echo Build started on `date`
+      - export NODE_OPTIONS=--openssl-legacy-provider
+      - npm run build
+      - npm run test
+      - echo Runnng sonar-scanner on `date`
+      - curl ifconfig.co
+      - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-3.2.0.1227-linux.zip
+      - unzip sonar-scanner-cli-3.2.0.1227-linux.zip
+      - aws s3 cp s3://$CONFIG_BUCKET_NAME/config/sonar-scanner.properties sonar-scanner-3.2.0.1227-linux/conf/sonar-scanner.properties
+      - ./sonar-scanner-3.2.0.1227-linux/bin/sonar-scanner -Dsonar.host.url=$SONAR_HOST -Dsonar.login=$SONAR_TOKEN -Dsonar.projectKey=$projectKey -Dsonar.projectVersion=$projectVersion
+  post_build:
+    commands:
+      - pwd
+      - ls -ltr
+      - aws s3 rm s3://${S3_BUCKET} --recursive --exclude "artist-report/*" --exclude "user-guide/*" --exclude  "profile-picture/*" --exclude "logo/*" --exclude "fonts/*" --exclude "distributor-logo/*"
+      - aws s3 cp build s3://${S3_BUCKET} --recursive  --acl public-read
+      - aws cloudfront create-invalidation --distribution-id ${DISTRIBUTION_ID} --paths "/*"
+      - echo Build completed on `date`
+artifacts:
+  files:
+    - '**/*'
+  base-directory: build

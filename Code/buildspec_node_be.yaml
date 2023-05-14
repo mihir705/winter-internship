@@ -1,0 +1,56 @@
+version: 0.2
+environment_variables:
+  plaintext:
+     S3_BUCKET: ""
+     FUNCTION_NAME: ""
+     projectKey: ""
+     projectVersion: "master"
+     projectName: ""
+env:
+  parameter-store:
+     SONAR_TOKEN: 'SONAR_TOKEN'
+     SONAR_HOST: 'SONAR_HOST'
+phases:
+  install:
+      runtime-versions:
+       nodejs: 18
+      commands:
+       - echo Installing NPM Packages
+       - npm install
+
+  pre_build:
+    commands:
+       - echo copy development env for migration
+       - echo install pre build commands
+       - aws s3 cp s3://$S3_BUCKET//config/testing.env .
+       - aws s3 cp s3://$S3_BUCKET//config/development.env .
+       - ls -la
+  build:
+    commands:
+      - echo Entering build Phase
+      - echo migration testing database start
+      - NODE_ENV=testing node_modules/migrate-mongo/bin/migrate-mongo.js up
+      - echo migration testing database end
+      - echo test start
+      - npm test
+      - echo test completed
+      - rm -R node_modules/
+      - npm install --omit=dev
+      - echo migration start
+      - NODE_ENV=development node_modules/migrate-mongo/bin/migrate-mongo.js up
+      - echo migration ends
+      - echo zip -r function.zip . -x test/**\* migrate-mongo.js
+      - wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-3.2.0.1227-linux.zip
+      - unzip sonar-scanner-cli-3.2.0.1227-linux.zip
+      - aws s3 cp s3://$S3_BUCKET//config/sonar-scanner.properties sonar-scanner-3.2.0.1227-linux/conf/sonar-scanner.properties
+      - ./sonar-scanner-3.2.0.1227-linux/bin/sonar-scanner -X -Dsonar.host.url=$SONAR_HOST -Dsonar.login=$LB_SONAR_TOKEN -Dsonar.projectKey=$projectKey -Dsonar.projectVersion=$projectVersion
+      - zip -r function.zip . -x test/**\* .scannerwork/**\* .nyc_output/**\* coverage/**\* migrations/**\* sonar-scanner-cli-3.2.0.1227-linux.zip sonar-scanner-3.2.0.1227-linux/**\* migrate-mongo.js
+      - ls -la
+  post_build:
+    commands:
+      - echo Entering Post_Build Phase
+      - aws s3 cp function.zip s3://$S3_BUCKET//
+      - aws lambda update-function-code --function-name "$FUNCTION_NAME" --s3-bucket $S3_BUCKET --s3-key lb-usw1-node-pipelin/function.zip
+artifacts:
+   files:
+    - '**/*'
